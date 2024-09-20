@@ -163,7 +163,39 @@ def add_guards(filepath, fb_name, hashes):
     with open(filepath, "wt", encoding=common.detect_encoding(filepath)) as g:
         g.write(src)
 
+    # add guards to all actions
+    actions = re.findall(r'<Action(.*?)Name="(.*?)"(.*?)<ST><!\[CDATA\[(.*?)\]\]><\/ST>', src, re.S | re.M | re.UNICODE)
+    if actions:
+        for m in actions:
+            action_name = m[1]
+            body = m[3]
+            old_body = body
+            hash = create_hash(filepath, fb_name, action_name, hashes)
 
+            body = '''{tag}Twingrind.Profiler.Push({hash});{tag}\n'''.format(hash=hash, tag=common.profiler_tag) + body
+            body, i = re.subn(r'RETURN([\s]*?);',
+                              r'''\1{tag}Twingrind.Profiler.Pop({hash});{tag}\1RETURN;'''.format(hash=hash, tag=common.profiler_tag),
+                              body, 0, re.S | re.M | re.UNICODE)
+            body = body + '''\n{tag}Twingrind.Profiler.Pop({hash});{tag}'''.format(hash=hash, tag=common.profiler_tag)
+
+            nearly += i # two guards are always added
+            ncallables += 1
+
+            src = src.replace(r'<Action{spacer0}Name="{action_name}"{spacer2}<ST><![CDATA[{body}]]></ST>'.format(spacer0=m[0],
+                                                                                          action_name=action_name,
+                                                                                          spacer2=m[2],
+                                                                                          body=old_body,
+                                                                                          fb=fb_name),
+                              r'<Action{spacer0}Name="{action_name}"{spacer2}<ST><![CDATA[{body}]]></ST>'.format(spacer0=m[0],
+                                                                                          action_name=action_name,
+                                                                                          spacer2=m[2],
+                                                                                          body=body,
+                                                                                          fb=fb_name))
+
+    logging.debug("{}: added {} guards and covered {} paths".format(fb_name, ncallables, nearly+1))
+
+    with open(filepath, "wt", encoding=common.detect_encoding(filepath)) as g:
+        g.write(src)
 
 def run(filepath : str, hashmap : str):
     hashes = {}
