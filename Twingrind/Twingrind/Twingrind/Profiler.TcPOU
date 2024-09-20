@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.11">
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.12">
   <POU Name="Profiler" Id="{b9b8f223-2122-4b0c-bf7b-2e173ae50fad}" SpecialFunc="None">
     <Declaration><![CDATA[{attribute 'hide_all_locals'}
 PROGRAM Profiler
@@ -26,7 +26,8 @@ VAR
   _meta : REFERENCE TO FrameMeta REF= Meta[0];
   _data : REFERENCE TO ARRAY[0..ParameterList.MAX_STACKSIZE] OF FrameData REF= Data[0, 1];
   _cpuCounter : GETCPUCOUNTER;
-  _currenttask : GETCURTASKINDEX;
+  _profilerTaskIdx : DINT;
+  _prifilerCoreIdx : DINT;
   _cycleDuration : LREAL; //< in percent
   _enabled : BOOL;
   _maxDuration : LREAL;
@@ -37,6 +38,8 @@ VAR
   _resetTrig : R_TRIG;
   _i, _j : SINT;
   _taskIt : UDINT;
+  
+//  _criticalSection : FB_IecCriticalSection;
 END_VAR
 VAR CONSTANT
   MAX_TASKS : SINT:=1;
@@ -44,26 +47,33 @@ END_VAR
 
 ]]></Declaration>
     <Implementation>
-      <ST><![CDATA[_enabled := FALSE;
+      <ST><![CDATA[//_criticalSection.Enter();
+_enabled := FALSE;
 _frameRecorded(CLK:=_enabled);
 _captureOnceTrig(CLK:=CaptureOnce);
 _resetTrig(CLK:=Reset);
 _captureContinuousTrig(CLK:=CaptureContinuous);
 
+_profilerTaskIdx := GETCURTASKINDEXEX();
+_prifilerCoreIdx := F_GetCpuCoreIndex(_profilerTaskIdx);
+IF (_profilerTaskIdx <= 0 ) THEN
+//	_criticalSection.Leave();
+  RETURN;
+END_IF
 // Initialization get cycle time for all tasks. Report an
 // error if the PLC is using more than 1 task, because this is not
 // supported atm
 IF _taskIt < 1
 THEN
-  IF TwinCAT_SystemInfoVarList._AppInfo.TaskCnt > SINT_TO_UDINT(MAX_TASKS)
-  THEN
-    Error := TRUE;
-    ErrorMessage := 'Twingrind only supports PLCs with 1 tasks only!';
-    RETURN;
-	END_IF
+//  IF TwinCAT_SystemInfoVarList._AppInfo.TaskCnt > SINT_TO_UDINT(MAX_TASKS)
+//  THEN
+//    Error := TRUE;
+//    ErrorMessage := 'Twingrind only supports PLCs with 1 tasks only!';
+//    RETURN;
+//  END_IF
   
-  Tasks := UDINT_TO_SINT(TwinCAT_SystemInfoVarList._AppInfo.TaskCnt);
-  FOR _taskIt:=1 TO TwinCAT_SystemInfoVarList._AppInfo.TaskCnt
+  Tasks := 1; //UDINT_TO_SINT(TwinCAT_SystemInfoVarList._AppInfo.TaskCnt);
+  FOR _taskIt:=1 TO Tasks
   DO
     CycleTime[_taskIt] := TwinCAT_SystemInfoVarList._TaskInfo[_taskIt].CycleTime;
 	END_FOR
@@ -81,11 +91,10 @@ IF _frameRecorded.Q
 THEN
   _meta.Size := _size;
   _meta.TotalDuration := _data[_size-1].EndHi - _data[0].StartHi + _data[_size-1].EndLo - _data[0].StartLo;
-  _currenttask();
-  
+
   // Check if the frame that was just recorded should be kept, if so, find the next place in the date structure where
   // we can write into
-  _cycleDuration := 100 * UDINT_TO_LREAL(TwinCAT_SystemInfoVarList._TaskInfo[_currenttask.index].LastExecTime) / UDINT_TO_LREAL(TwinCAT_SystemInfoVarList._TaskInfo[_currenttask.index].CycleTime);
+  _cycleDuration := 100 * UDINT_TO_LREAL(TwinCAT_SystemInfoVarList._TaskInfo[_profilerTaskIdx].LastExecTime) / UDINT_TO_LREAL(TwinCAT_SystemInfoVarList._TaskInfo[_profilerTaskIdx].CycleTime);
   IF (_cycleDuration > CaptureCpuTimeLowThreshold AND_THEN _cycleDuration < CaptureCpuTimeHighThreshold) OR_ELSE 
      (CaptureCpuTimeLowThreshold = 0 AND_THEN CaptureCpuTimeHighThreshold = 0)
   THEN
@@ -124,8 +133,9 @@ Busy := _enabled;
 _depth := 0;
 _data REF= Data[FrameIndex, 1];
 _meta REF= Meta[FrameIndex];
-_meta.Id := TwinCAT_SystemInfoVarList._TaskInfo[1].CycleCount;
-_frameRecorded(CLK:=_enabled);]]></ST>
+_meta.Id := TwinCAT_SystemInfoVarList._TaskInfo[_profilerTaskIdx].CycleCount;
+_frameRecorded(CLK:=_enabled);
+//_criticalSection.Leave();]]></ST>
     </Implementation>
     <Method Name="NextFrameIndex" Id="{8dd8eb4b-6627-47b8-aca6-2ccd3eea6ba1}">
       <Declaration><![CDATA[METHOD INTERNAL NextFrameIndex : SINT
@@ -188,10 +198,20 @@ END_CASE]]></ST>
       <Declaration><![CDATA[METHOD Pop
 VAR_INPUT
   hash : UDINT;
+END_VAR
+VAR
+  currentTaskIdx : DINT;
 END_VAR]]></Declaration>
       <Implementation>
         <ST><![CDATA[IF NOT _enabled
 THEN
+  RETURN;
+END_IF
+//_criticalSection.Enter();
+// only capture task where profiler is called
+IF GETCURTASKINDEXEX() <> _profilerTaskIdx
+THEN
+//  _criticalSection.Leave();
   RETURN;
 END_IF
 
@@ -207,6 +227,7 @@ THEN
   _enabled := FALSE;
   Error := TRUE;
   ErrorMessage := 'Pop/Push mismatch!';
+//  _criticalSection.Leave();
   RETURN;   
 ELSE
   _size := _size + 1;
@@ -218,7 +239,8 @@ THEN
   _enabled := FALSE;
   Error := TRUE;
   ErrorMessage := 'The method stack is too big!';  
-END_IF]]></ST>
+END_IF
+//_criticalSection.Leave();]]></ST>
       </Implementation>
     </Method>
     <Method Name="Push" Id="{26712f5b-9f3a-41ce-84ed-21cb2c030962}">
@@ -233,7 +255,13 @@ END_VAR
 THEN
   RETURN;
 END_IF
-
+//_criticalSection.Enter();
+// only capture task where profiler is called
+IF GETCURTASKINDEXEX() <> _profilerTaskIdx
+THEN
+//  _criticalSection.Leave();
+  RETURN;
+END_IF
 _data[_size].depth := _depth;
 _data[_size].hash := hash;
 _cpuCounter(cpuCntLoDW => _data[_size].StartLo, cpuCntHiDW => _data[_size].StartHi);
@@ -249,7 +277,106 @@ THEN
   Error := TRUE;
   ErrorMessage := 'The method stack is too big!';
 END_IF
-]]></ST>
+//_criticalSection.Leave();]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="TasksFirstPush" Id="{aa4aab76-0989-4cbd-ae45-1b2c1cfd1898}">
+      <Declaration><![CDATA[METHOD TasksFirstPush
+VAR_INPUT
+  hash : UDINT;
+END_VAR
+
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF NOT _enabled
+THEN
+  RETURN;
+END_IF
+// only capture task where profiler is called
+IF GETCURTASKINDEXEX() <> _profilerTaskIdx
+THEN
+  RETURN;
+END_IF
+
+//_criticalSection.Enter();
+// we record the first push of every task in the same core so we have the interrupts in the profile
+IF _prifilerCoreIdx <> F_GetCpuCoreIndex(_profilerTaskIdx)
+THEN
+//  _criticalSection.Leave();
+  RETURN;
+END_IF
+_data[_size].depth := _depth;
+_data[_size].hash := hash;
+_data[_size].StartLo := _cpuCounter.cpuCntLoDW+1; 
+_data[_size].StartHi := _cpuCounter.cpuCntHiDW;
+_data[_size].endhi := 0;
+_data[_size].endlo := 0;
+_size := _size + 1;
+_depth := _depth + 1;
+
+// abort if the stack is getting too big (too many functions were called)
+IF _size > ParameterList.MAX_STACKSIZE
+THEN
+  _enabled := FALSE;
+  Error := TRUE;
+  ErrorMessage := 'The method stack is too big!';
+END_IF
+//_criticalSection.Leave();]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="TasksLastPop" Id="{f788bc2b-1686-443e-9acc-07aa44f1af6f}">
+      <Declaration><![CDATA[METHOD TasksLastPop
+VAR_INPUT
+  hash : UDINT;
+END_VAR
+VAR
+  currentTaskIdx : DINT;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF NOT _enabled
+THEN
+  RETURN;
+END_IF
+// only capture task where profiler is called
+IF GETCURTASKINDEXEX() <> _profilerTaskIdx
+THEN
+  RETURN;
+END_IF
+//_criticalSection.Enter();
+// we record the first push of every task in the same core so we have the interrupts in the profile
+IF _prifilerCoreIdx <> F_GetCpuCoreIndex(_profilerTaskIdx)
+THEN
+  //_criticalSection.Leave();
+  RETURN;
+END_IF
+
+_depth := _depth - 1;
+_data[_size].Depth := _depth;
+_data[_size].Hash := hash;
+_data[_size].StartHi := 0;
+_data[_size].StartLo := 0;
+_data[_size].EndLo := _cpuCounter.cpuCntLoDW+2;
+_data[_size].EndHi := _cpuCounter.cpuCntHiDW;
+
+IF _depth < 0
+THEN
+  _enabled := FALSE;
+  Error := TRUE;
+  ErrorMessage := 'Pop/Push mismatch!';
+  //_criticalSection.Leave();
+  RETURN;   
+ELSE
+  _size := _size + 1;
+END_IF
+
+// abort if the stack is getting too big (too many functions were called)
+IF _size > ParameterList.MAX_STACKSIZE
+THEN
+  _enabled := FALSE;
+  Error := TRUE;
+  ErrorMessage := 'The method stack is too big!';  
+END_IF
+//_criticalSection.Leave();]]></ST>
       </Implementation>
     </Method>
   </POU>
