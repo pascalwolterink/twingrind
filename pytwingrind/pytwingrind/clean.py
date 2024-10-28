@@ -14,7 +14,7 @@ def remove_guards(filepath: str, fb_name: str):
         src = f.read()
         src, i = re.subn(r'{tag}Twingrind\.Profiler\.Push.*?{tag}\r?\n'.format(tag=re.escape(common.profiler_tag)), '', src, 0, re.M | re.UNICODE)
         src, j = re.subn(r'{tag}Twingrind\.Profiler\.Pop.*?{tag}RETURN'.format(tag=re.escape(common.profiler_tag)), 'RETURN', src, 0, re.M | re.UNICODE)
-        src, k = re.subn(r'\r?\n{tag}Twingrind\.Profiler\.Pop.*?{tag}'.format(tag=re.escape(common.profiler_tag)), '', src, 0, re.M | re.UNICODE)        
+        src, k = re.subn(r'\r?\n{tag}Twingrind\.Profiler\.Pop.*?{tag}'.format(tag=re.escape(common.profiler_tag)), '', src, 0, re.M | re.UNICODE)
         logging.debug("{}: removed {} guards".format(fb_name, int(i))) # we should have 2 guards per method
 
 

@@ -6,7 +6,7 @@ pytwingrind/dist
 # TwinCAT files
 *.tpy
 *.tclrs
-*.compiled-library
+!*.compiled-library
 *.compileinfo
 # Don't include the tmc-file rule if either of the following is true:
 #   1. You've got TwinCAT C++ projects, as the information in the TMC-file is created manually for the C++ projects (in that case, only (manually) ignore the tmc-files for the PLC projects)
@@ -44,7 +44,7 @@ mono_crash.*
 # Build results
 [Dd]ebug/
 [Dd]ebugPublic/
-[Rr]elease/
+![Rr]elease/
 [Rr]eleases/
 x64/
 x86/
@@ -411,3 +411,6 @@ FodyWeavers.xsd
 # JetBrains Rider
 .idea/
 *.sln.iml
+
+venv
+.vscode

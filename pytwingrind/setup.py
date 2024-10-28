@@ -5,7 +5,7 @@ from os import environ
 
 setup(
     name="pytwingrind",
-    version=f"0.4.1",
+    version=f"0.4.2",
     author="Stefan Besler",
     author_email="stefan@besler.me",
     description="Call-graph profiling for TwinCAT 3.",
